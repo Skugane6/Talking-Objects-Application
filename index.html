@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1e293b">
+  <title>Talking Objects - Bring Objects to Life</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Camera View -->
+    <div id="camera-container">
+      <video id="camera-feed" autoplay playsinline></video>
+      <canvas id="motion-canvas" style="display: none;"></canvas>
+
+      <!-- Expression Overlay -->
+      <div id="expression-overlay">
+        <div class="expression-eyes">
+          <div class="eye">
+            <div class="pupil"></div>
+          </div>
+          <div class="eye">
+            <div class="pupil"></div>
+          </div>
+        </div>
+        <div class="expression-particles"></div>
+      </div>
+
+      <!-- Object Label Overlay -->
+      <div id="object-label" class="hidden">
+        <span id="object-name">📦 Unknown Object</span>
+      </div>
+
+      <!-- Status Indicator -->
+      <div id="status-indicator" class="status-idle">
+        <div class="pulse"></div>
+        <span id="status-text">Ready</span>
+      </div>
+    </div>
+
+    <!-- Speech Bubble -->
+    <div id="speech-bubble" class="hidden">
+      <p id="speech-text"></p>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls">
+      <button id="start-btn" class="primary-btn">
+        <span class="icon">🎥</span>
+        <span>Start Talking</span>
+      </button>
+      <button id="stop-btn" class="secondary-btn hidden">
+        <span class="icon">⏹️</span>
+        <span>Stop</span>
+      </button>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settings" class="collapsed">
+      <button id="settings-toggle">⚙️</button>
+      <div id="settings-content">
+        <label>
+          <span>Personality Style:</span>
+          <select id="personality-select">
+            <option value="playful">Playful & Curious</option>
+            <option value="grumpy">Grumpy & Sarcastic</option>
+            <option value="wise">Wise & Philosophical</option>
+            <option value="excited">Excited & Energetic</option>
+            <option value="chill">Chill & Laid-back</option>
+            <option value="fearful">Fearful & Anxious</option>
+          </select>
+        </label>
+        <label>
+          <span>Check Interval:</span>
+          <select id="interval-select">
+            <option value="3000">3 seconds</option>
+            <option value="5000" selected>5 seconds</option>
+            <option value="7000">7 seconds</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <!-- Theme Toggle -->
+    <button id="theme-toggle" title="Toggle Dark/Light Mode">🌙</button>
+
+    <!-- Volume Control -->
+    <div id="volume-control" class="hidden">
+      <span>🔊</span>
+      <input type="range" id="volume-slider" min="0" max="100" value="100">
+    </div>
+
+    <!-- Reaction Buttons -->
+    <div id="reaction-buttons" class="hidden">
+      <button class="reaction-btn" data-reaction="compliment" title="Compliment">💖</button>
+      <button class="reaction-btn" data-reaction="laugh" title="Make it laugh">😂</button>
+      <button class="reaction-btn" data-reaction="surprise" title="Surprise">😲</button>
+      <button class="reaction-btn" data-reaction="grumpy" title="Make it grumpy">😠</button>
+    </div>
+
+    <!-- Error/Info Messages -->
+    <div id="message-toast" class="hidden"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
