@@ -59,6 +59,8 @@ class TalkingObjectsApp {
     this.minAnalysisInterval = 5000; // 5 seconds default
     this.currentExpression = null;
     this.expressionTimeout = null;
+    this.quotaPaused = false;
+    this.quotaResumeTime = null;
 
     // Initialize
     this.init();
@@ -205,8 +207,17 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
 
       this.displaySpeech(text);
       this.setStatus('speaking', 'Reacting...');
-      await this.tts.speak(text, this.gemini.currentObject);
-      this.setStatus('idle', 'Ready');
+      try {
+        await this.tts.speak(text, this.gemini.currentObject);
+        this.setStatus('idle', 'Ready');
+      } catch (speechError) {
+        console.log('Reaction speech error:', speechError);
+        // Only show message if it's a critical error
+        if (speechError.message?.includes('not supported')) {
+          this.showMessage('Text-to-speech not available', 'error', 3000);
+        }
+        this.setStatus('idle', 'Ready');
+      }
     } catch (error) {
       console.log('Reaction generation error:', error);
       // Fallback to generic reactions
@@ -224,6 +235,10 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
         this.setStatus('idle', 'Ready');
       } catch (error) {
         console.log('Reaction speech error:', error);
+        // Only show message if it's a critical error
+        if (error.message?.includes('not supported')) {
+          this.showMessage('Text-to-speech not available', 'error', 3000);
+        }
         this.setStatus('idle', 'Ready');
       }
     }
@@ -281,17 +296,26 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
     this.tts.stop();
     this.backgroundSound.stop();
 
-    // Clear intervals
+    // Clear intervals and timeouts
     if (this.analysisInterval) {
       clearInterval(this.analysisInterval);
       this.analysisInterval = null;
     }
 
+    if (this.expressionTimeout) {
+      clearTimeout(this.expressionTimeout);
+      this.expressionTimeout = null;
+    }
+
     // Reset state
     this.isRunning = false;
+    this.quotaPaused = false;
+    this.quotaResumeTime = null;
+    this.currentExpression = null;
     this.motionDetector.reset();
     this.gemini.resetHistory();
     this.similarityDetector.reset();
+    this.objectDetector.reset();
 
     // Update UI
     this.reset();
@@ -356,6 +380,21 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
       return;
     }
 
+    // Check if we're paused due to quota
+    if (this.quotaPaused) {
+      const now = Date.now();
+      if (now < this.quotaResumeTime) {
+        const secondsLeft = Math.ceil((this.quotaResumeTime - now) / 1000);
+        this.setStatus('idle', `Quota exceeded. Resuming in ${secondsLeft}s`);
+        return;
+      } else {
+        // Resume
+        this.quotaPaused = false;
+        this.quotaResumeTime = null;
+        this.showMessage('Quota resumed! Continuing analysis...', 'success', 2000);
+      }
+    }
+
     try {
       this.setStatus('analyzing', 'Looking...');
       this.lastAnalysisTime = Date.now();
@@ -400,9 +439,24 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
 
     } catch (error) {
       console.error('Analysis error:', error);
-      // Errors are now handled gracefully in geminiAPI.js with void fallback
-      // No need to show error message to user
-      this.setStatus('idle', 'Ready');
+
+      // Check if it's a quota error
+      if (error.message === 'QUOTA_EXCEEDED') {
+        const retryAfter = error.retryAfter || 60;
+        this.quotaPaused = true;
+        this.quotaResumeTime = Date.now() + (retryAfter * 1000);
+
+        this.showMessage(
+          `Daily quota exceeded (50 requests/day). Pausing for ${retryAfter}s...`,
+          'error',
+          5000
+        );
+        this.setStatus('idle', `Quota exceeded. Resuming in ${retryAfter}s`);
+      } else {
+        // Show brief error message and return to ready state
+        this.showMessage('Could not analyze image. Retrying...', 'error', 2000);
+        this.setStatus('idle', 'Ready');
+      }
     }
   }
 
@@ -465,8 +519,14 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
       await this.tts.speak(result.response, result.object);
       this.setStatus('idle', 'Ready');
     } catch (error) {
-      // Speech error
+      // Speech error - log but don't show to user unless critical
       console.log('Speech error:', error);
+
+      // Only show message if it's a critical error (not just network hiccup)
+      if (error.message?.includes('not supported')) {
+        this.showMessage('Text-to-speech not available', 'error', 3000);
+      }
+
       this.setStatus('idle', 'Ready');
     }
   }
@@ -673,6 +733,8 @@ Format: Just the response text, nothing else. Stay in character as the object.`;
     this.elements.speechBubble.classList.add('hidden');
     this.elements.volumeControl.classList.add('hidden');
     this.elements.reactionButtons.classList.add('hidden');
+    this.elements.expressionOverlay.classList.remove('active', 'happy', 'fearful', 'surprised', 'angry');
+    this.elements.expressionParticles.innerHTML = '';
     this.setStatus('idle', 'Ready');
   }
 }

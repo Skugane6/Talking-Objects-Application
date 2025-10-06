@@ -50,6 +50,11 @@ export class GeminiVision {
       const response = await result.response;
       const text = response.text();
 
+      // Safety check - ensure we got a valid response
+      if (!text || text.trim().length === 0) {
+        throw new Error('Empty response from Gemini API');
+      }
+
       // Parse response to extract object identity and dialogue
       const parsed = this.parseResponse(text);
 
@@ -65,17 +70,20 @@ export class GeminiVision {
 
     } catch (error) {
       console.error('Gemini API error:', error);
-      // Fallback to "the void" instead of throwing error
-      const voidResponse = {
-        object: '🌌 The Void',
-        response: this.getVoidResponse()
-      };
 
-      // Update conversation history and current object
-      this.updateHistory(voidResponse.response);
-      this.currentObject = voidResponse.object;
+      // Check if it's a quota error
+      if (error.message?.includes('quota') || error.message?.includes('429')) {
+        // Extract retry delay if available
+        const retryMatch = error.message.match(/retry in (\d+)/i);
+        const retrySeconds = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : 60;
 
-      return voidResponse;
+        const quotaError = new Error('QUOTA_EXCEEDED');
+        quotaError.retryAfter = retrySeconds;
+        throw quotaError;
+      }
+
+      // Other errors - allow retry
+      throw new Error('Failed to analyze image. Please try again.');
     }
   }
 
@@ -166,6 +174,11 @@ Be observant, reactive, and fun! Keep it VERY SHORT (one sentence, 10-15 words).
 
     // Clean up response
     response = response.replace(/^(OBJECT:|SPEECH:)/gi, '').trim();
+
+    // Safety check - ensure response is not empty after cleanup
+    if (!response || response.length === 0) {
+      response = "I'm here!";
+    }
 
     return { object, response };
   }

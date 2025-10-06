@@ -29,3 +29,9 @@ dist-ssr
 *.sw?
 .claude
 .vercel
+
+# Testing documentation
+TESTING.md
+BUG_FIXES.md
+TEST_CHECKLIST.md
+TESTING_COMPLETE.md

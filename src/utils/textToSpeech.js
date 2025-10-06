@@ -11,6 +11,7 @@ export class TextToSpeech {
     this.voiceMap = {};
     this.currentAudio = null;
     this.audioContext = null;
+    this.currentBlobUrl = null; // Track blob URL for cleanup
 
     // ElevenLabs API config
     this.elevenLabsApiKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
@@ -70,14 +71,19 @@ export class TextToSpeech {
    * Call this on the start button click
    */
   initAudioOnUserGesture() {
+    // Create audio element if it doesn't exist
     if (!this.currentAudio) {
       this.currentAudio = new Audio();
       this.currentAudio.preload = 'auto';
+      this.currentAudio.playsInline = true; // Critical for iOS
+
       // Play silent audio to unlock iOS audio
-      this.currentAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+      const silentAudio = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+      this.currentAudio.src = silentAudio;
+
       this.currentAudio.play().then(() => {
         this.currentAudio.pause();
-        this.currentAudio.src = '';
+        this.currentAudio.currentTime = 0;
         console.log('Audio unlocked for iOS');
       }).catch(e => {
         console.log('Audio unlock not needed or failed:', e);
@@ -160,13 +166,19 @@ export class TextToSpeech {
       return Promise.resolve();
     }
 
-    // Try ElevenLabs first, fallback to Web Speech API
+    // Try ElevenLabs first, only fallback if quota is exhausted
     if (this.useElevenLabs) {
       try {
         return await this.speakWithElevenLabs(cleanText, objectType);
       } catch (error) {
-        console.warn('ElevenLabs failed, falling back to Web Speech API:', error);
-        return await this.speakWithWebAPI(cleanText, objectType);
+        // Only fallback to Web Speech API if quota is exhausted
+        if (error.isQuotaError) {
+          console.warn('ElevenLabs quota exhausted, falling back to Web Speech API');
+          this.useElevenLabs = false; // Disable for rest of session
+          return await this.speakWithWebAPI(cleanText, objectType);
+        }
+        // For other errors (network, etc), throw to let caller retry
+        throw error;
       }
     } else {
       return await this.speakWithWebAPI(cleanText, objectType);
@@ -187,8 +199,13 @@ export class TextToSpeech {
         // Stop and clean up any existing audio
         if (this.currentAudio) {
           this.currentAudio.pause();
-          this.currentAudio.src = '';
-          this.currentAudio = null;
+          this.currentAudio.currentTime = 0;
+        }
+
+        // Clean up previous blob URL to prevent memory leak
+        if (this.currentBlobUrl) {
+          URL.revokeObjectURL(this.currentBlobUrl);
+          this.currentBlobUrl = null;
         }
 
         this.isSpeaking = true;
@@ -217,34 +234,65 @@ export class TextToSpeech {
         console.log('ElevenLabs response status:', response.status);
 
         if (!response.ok) {
+          // Check if it's a quota error (401 for invalid key, 429 for rate limit, 403 for quota exceeded)
+          if (response.status === 401 || response.status === 403 || response.status === 429) {
+            let errorMessage = 'Quota exceeded';
+
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.detail?.message || errorData.message || errorMessage;
+            } catch (e) {
+              // If JSON parsing fails, use status code
+            }
+
+            // Check if quota is exhausted (not just rate limited)
+            if (errorMessage.toLowerCase().includes('quota') ||
+                errorMessage.toLowerCase().includes('character limit') ||
+                errorMessage.toLowerCase().includes('insufficient') ||
+                response.status === 401) {
+              const quotaError = new Error(`ElevenLabs quota exhausted: ${errorMessage}`);
+              quotaError.isQuotaError = true;
+              throw quotaError;
+            }
+          }
+
+          // Other errors - could be temporary
           throw new Error(`ElevenLabs API error: ${response.status}`);
         }
 
         const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
 
+        // Store blob URL for cleanup
+        this.currentBlobUrl = audioUrl;
+
         // Reuse or create audio element
         if (!this.currentAudio) {
           this.currentAudio = new Audio();
-          // Mobile Safari: load immediately
           this.currentAudio.preload = 'auto';
+          this.currentAudio.playsInline = true; // Critical for iOS
         }
 
         this.currentAudio.src = audioUrl;
 
-        // Store URL for cleanup
-        const currentUrl = audioUrl;
-
         this.currentAudio.onended = () => {
           this.isSpeaking = false;
-          URL.revokeObjectURL(currentUrl);
+          // Clean up blob URL
+          if (this.currentBlobUrl) {
+            URL.revokeObjectURL(this.currentBlobUrl);
+            this.currentBlobUrl = null;
+          }
           resolve();
         };
 
         this.currentAudio.onerror = (error) => {
           console.error('Audio playback error:', error);
           this.isSpeaking = false;
-          URL.revokeObjectURL(currentUrl);
+          // Clean up blob URL
+          if (this.currentBlobUrl) {
+            URL.revokeObjectURL(this.currentBlobUrl);
+            this.currentBlobUrl = null;
+          }
           reject(error);
         };
 
@@ -257,11 +305,20 @@ export class TextToSpeech {
         } catch (playError) {
           console.error('Play failed:', playError);
           this.isSpeaking = false;
-          URL.revokeObjectURL(currentUrl);
+          // Clean up blob URL
+          if (this.currentBlobUrl) {
+            URL.revokeObjectURL(this.currentBlobUrl);
+            this.currentBlobUrl = null;
+          }
           reject(playError);
         }
       } catch (error) {
         this.isSpeaking = false;
+        // Clean up blob URL on error
+        if (this.currentBlobUrl) {
+          URL.revokeObjectURL(this.currentBlobUrl);
+          this.currentBlobUrl = null;
+        }
         reject(error);
       }
     });
@@ -404,8 +461,14 @@ export class TextToSpeech {
     // Stop ElevenLabs audio
     if (this.currentAudio) {
       this.currentAudio.pause();
-      this.currentAudio.src = '';
+      this.currentAudio.currentTime = 0;
       // Don't set to null - reuse the element
+    }
+
+    // Clean up blob URL
+    if (this.currentBlobUrl) {
+      URL.revokeObjectURL(this.currentBlobUrl);
+      this.currentBlobUrl = null;
     }
 
     // Stop Web Speech API
